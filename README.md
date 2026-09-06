@@ -1,3 +1,5 @@
+**English** | [Русский](README_RU.md)
+
 # LeadSignal HQ
 
 **Lead qualification, routing, SLA tracking, and CRM-ready automation.**
