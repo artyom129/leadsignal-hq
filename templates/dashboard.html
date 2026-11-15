@@ -1,1 +1,127 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LeadSignal HQ</title><style>:root{--bg:#07111f;--p:#0c1728;--p2:#111f34;--l:#23344d;--t:#eef6ff;--m:#8ea4bd;--b:#48a7ff;--g:#35e6a4}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui;background:radial-gradient(circle at 20% 0%,#102b4a 0,#07111f 34%);color:var(--t)}.w{max-width:1400px;margin:auto;padding:34px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.brand{font-size:31px;font-weight:800}.brand span{color:var(--b)}.sub{color:var(--m)}.on{background:#0f2b24;color:var(--g);padding:9px 13px;border:1px solid #1e5c4a;border-radius:999px}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}.card{background:linear-gradient(180deg,var(--p2),var(--p));border:1px solid var(--l);border-radius:18px;padding:18px}.lab{color:var(--m);font-size:13px}.val{font-size:30px;font-weight:800;margin-top:7px}.two{display:grid;grid-template-columns:1.3fr .7fr;gap:16px;margin-top:16px}h2{font-size:18px;margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--m);padding:10px 8px;border-bottom:1px solid var(--l)}td{padding:11px 8px;border-bottom:1px solid #17263b}.pill{padding:4px 8px;border-radius:99px;font-weight:800;font-size:11px}.hot{background:#401d28;color:#ff8ca0}.warm{background:#4a3516;color:#ffc66e}.normal{background:#15354a;color:#8fd2ff}.ev{padding:11px 0;border-bottom:1px solid #17263b}.ev span{display:block;color:var(--m);font-size:12px}form.f{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}input,select{padding:11px;border-radius:10px;border:1px solid var(--l);background:#091523;color:var(--t)}button{border:0;border-radius:10px;padding:10px;background:linear-gradient(90deg,#2b8cff,#5a65ff);color:white;font-weight:700}.flow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.node{padding:10px;border:1px solid var(--l);border-radius:10px;background:#091523}.arr{color:var(--b)}@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}</style></head><body><div class="w"><div class="top"><div><div class="brand">Lead<span>Signal</span> HQ</div><div class="sub">Lead qualification, routing, SLA tracking & CRM-ready automation</div></div><div class="on">● Automation online</div></div><div class="grid"><div class="card"><div class="lab">Total leads</div><div class="val">{{stats.total}}</div></div><div class="card"><div class="lab">Hot leads</div><div class="val">{{stats.hot}}</div></div><div class="card"><div class="lab">Warm leads</div><div class="val">{{stats.warm}}</div></div><div class="card"><div class="lab">Won</div><div class="val">{{stats.won}}</div></div><div class="card"><div class="lab">Average score</div><div class="val">{{stats.avg}}</div></div><div class="card"><div class="lab">SLA overdue</div><div class="val">{{stats.overdue}}</div></div></div><div class="two"><div class="card"><h2>Lead queue</h2><table><tr><th>Name</th><th>Source</th><th>Interest</th><th>Score</th><th>Owner</th><th>Status</th></tr>{% for l in leads %}<tr><td><b>{{l.name}}</b><br><span style="color:#8ea4bd">{{l.company}}</span></td><td>{{l.source}}</td><td>{{l.interest}}</td><td><span class="pill {{l.priority}}">{{l.score}} · {{l.priority}}</span></td><td>{{l.owner}}</td><td>{{l.status}}</td></tr>{% endfor %}</table></div><div class="card"><h2>Automation events</h2>{% for e in events %}<div class="ev"><b>{{e.event_type}}</b><span>{{e.detail}}</span></div>{% endfor %}</div></div><div class="two"><div class="card"><h2>Test intake pipeline</h2><form class="f" method="post" action="/leads/form"><input name="name" placeholder="Lead name" required><input name="email" type="email" placeholder="Email" required><input name="company" placeholder="Company"><input name="country" placeholder="Country"><input name="budget" type="number" placeholder="Budget"><select name="interest"><option>automation</option><option>api integration</option><option>fastapi</option><option>crm integration</option><option>data pipeline</option><option>web scraping</option></select><button style="grid-column:1/-1">Create & score lead</button></form></div><div class="card"><h2>Automation flow</h2><div class="flow"><div class="node">Forms / Ads / API</div><span class="arr">→</span><div class="node">Deduplicate</div><span class="arr">→</span><div class="node">Validate</div><span class="arr">→</span><div class="node">Score</div><span class="arr">→</span><div class="node">Route</div><span class="arr">→</span><div class="node">CRM / Alerts</div></div><p class="sub">Every lead receives a business score, priority, owner and SLA. Duplicate emails are blocked and every decision is written to an audit log.</p></div></div></div></body></html>
+{% extends "base.html" %}
+{% from "macros.html" import mins, ring %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>Lead board</h1>
+    <p>Every lead is scored, handed to an owner and given a deadline for the first reply.</p>
+  </div>
+  <a class="btn" href="/api/leads/export.csv?q={{ q|urlencode }}&status={{ status }}&priority={{ priority }}">Export this view</a>
+</header>
+
+{% if msg %}<div class="notice" role="status">{{ msg }}</div>{% endif %}
+
+<dl class="panel figures">
+  <div class="{{ 'late' if stats.overdue else '' }}"><dt>Waiting past deadline</dt><dd>{{ stats.overdue }}<small>of {{ stats.by_status.new }} unanswered</small></dd></div>
+  <div><dt>Hot leads</dt><dd>{{ stats.hot }}</dd></div>
+  <div><dt>Open pipeline</dt><dd>${{ "{:,.0f}".format(stats.pipeline_value) }}</dd></div>
+  <div><dt>Win rate</dt><dd>{{ stats.win_rate }}%<small>{{ stats.won }} won</small></dd></div>
+  <div><dt>Average score</dt><dd>{{ stats.avg_score }}</dd></div>
+</dl>
+
+<section class="panel board">
+  <div class="panel-head"><h2>Who needs a reply next</h2><span>unanswered leads by deadline, next 4 hours</span></div>
+  <div class="board-body">
+    {% if board["items"] %}
+    <div class="track" role="img" aria-label="Response deadlines of unanswered leads">
+      <div class="zone"></div>
+      <div class="axis"></div>
+      {% for item in board["items"] %}
+      {% set lead = item.lead %}
+      <a class="pin {{ 'late' if item.late else lead.priority }} stack{{ loop.index0 % 4 }}" href="/leads/{{ lead.id }}" style="left: {{ item.position }}%">
+        <i></i><b></b>
+        <span title="{{ lead.name }}, {{ lead.owner }}">{{ lead.name.split()[0] }} · {% if item.late %}{{ mins(item.left) }} late{% else %}{{ mins(item.left) }}{% endif %}</span>
+      </a>
+      {% endfor %}
+      <div class="now"><span>now</span></div>
+      <div class="ticks">
+        {% for tick in board.ticks %}<span style="left: {{ tick.position }}%">{{ tick.label }}</span>{% endfor %}
+      </div>
+    </div>
+    <div class="next-up">
+      {% for item in board["items"][:3] %}
+      {% set lead = item.lead %}
+      <a href="/leads/{{ lead.id }}">
+        {{ ring(lead, item.left) }}
+        <span><strong>{{ lead.name }}</strong><small>{% if item.late %}{{ mins(item.left) }} late{% else %}reply within {{ mins(item.left) }}{% endif %} · {{ lead.owner }}</small></span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="board-empty">Everyone has an answer. New leads will appear here with their deadline.</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="cols">
+  <section class="panel">
+    <div class="panel-head"><h2>All leads</h2><span>{{ matched }} {{ 'lead' if matched == 1 else 'leads' }}</span></div>
+    <form class="filters" method="get" action="/">
+      <input type="search" name="q" value="{{ q }}" placeholder="Name, email, company or interest" aria-label="Search">
+      <select name="status" aria-label="Status">
+        <option value="">Any status</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s | capitalize }}</option>{% endfor %}
+      </select>
+      <select name="priority" aria-label="Priority">
+        <option value="">Any priority</option>
+        {% for p in priorities %}<option value="{{ p }}" {% if p == priority %}selected{% endif %}>{{ p | capitalize }}</option>{% endfor %}
+      </select>
+      <button class="btn primary" type="submit">Apply</button>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Lead</th><th>Score</th><th>Owner</th><th>First reply</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for r in rows %}{% set l = r.lead %}
+          <tr>
+            <td class="who"><a href="/leads/{{ l.id }}">{{ l.name }}</a><small>{{ l.company or l.email }} · {{ l.interest or 'no interest given' }} · {{ l.source }}</small></td>
+            <td><span class="prio {{ l.priority }}"><b>{{ l.score }}</b>{{ l.priority }}</span></td>
+            <td>{{ l.owner }}</td>
+            <td>
+              {% if l.status != "new" %}<span class="due done">answered</span>
+              {% elif r.overdue %}<span class="due late">{{ ring(l, r.left, 'sm') }}{{ mins(r.left) }} late</span>
+              {% else %}<span class="due">{{ ring(l, r.left, 'sm') }}{{ mins(r.left) }} left</span>{% endif %}
+            </td>
+            <td><span class="state state-{{ l.status }}">{{ l.status }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">No leads match.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="side">
+    <section class="panel">
+      <div class="panel-head"><h2>Add a lead</h2><span>scored on save</span></div>
+      <form class="intake" method="post" action="/leads/form">
+        <label class="full">Name<input name="name" required maxlength="120"></label>
+        <label class="full">Email<input name="email" type="email" required></label>
+        <label>Company<input name="company"></label>
+        <label>Country<input name="country" placeholder="US, DE, KZ"></label>
+        <label>Budget, USD<input name="budget" type="number" min="0" step="any" value="0"></label>
+        <label>Interest
+          <select name="interest">
+            <option>automation</option><option>api integration</option><option>fastapi</option>
+            <option>crm integration</option><option>data pipeline</option><option>web scraping</option>
+          </select>
+        </label>
+        <button class="btn primary wide full" type="submit">Score and route</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Activity</h2></div>
+      <ul class="activity">
+        {% for a in activity %}
+        <li class="{{ a.event.event_type }}">
+          <span>{% if a.event.lead_id %}<a href="/leads/{{ a.event.lead_id }}">{{ a.name }}</a>{% else %}{{ a.name }}{% endif %} {{ a.verb }}{% if a.event.event_type == 'status_changed' %} {{ a.event.detail.replace('->', 'to') }}{% endif %}
+            <small>{% if a.event.event_type == 'lead_created' %}{{ a.event.detail }} · {% endif %}{{ a.event.created_at.strftime('%d %b %H:%M') }}</small></span>
+        </li>
+        {% else %}<li>Nothing yet.</li>{% endfor %}
+      </ul>
+    </section>
+  </aside>
+</div>
+{% endblock %}

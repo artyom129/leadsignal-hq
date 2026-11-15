@@ -1,0 +1,10 @@
+{% macro mins(value) -%}
+  {%- set m = value | abs -%}
+  {%- if m >= 60 %}{{ m // 60 }} h {{ '%02d' | format(m % 60) }} min{% else %}{{ m }} min{% endif -%}
+{%- endmacro %}
+
+{# Signature: the reply clock. A full ring means the whole response window is still left. #}
+{% macro ring(lead, left, size='') -%}
+  {%- set share = [[left / lead.sla_minutes, 0] | max, 1] | min -%}
+  <span class="ring {{ size }} {{ 'late' if left < 0 else lead.priority }}" style="--left: {{ share | round(3) }}" aria-hidden="true"></span>
+{%- endmacro %}

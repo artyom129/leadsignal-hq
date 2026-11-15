@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{% block title %}LeadSignal HQ{% endblock %}</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css?v=4">
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="/">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      LeadSignal
+    </a>
+    <nav>
+      <a href="/">Board</a>
+      <a href="/api/leads/export.csv">Export CSV</a>
+      <a href="/docs">API</a>
+    </nav>
+  </div>
+</header>
+<main class="shell">{% block content %}{% endblock %}</main>
+<footer class="foot">Scores, routes and response deadlines are computed on your server. No lead data leaves it.</footer>
+</body>
+</html>

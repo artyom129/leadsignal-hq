@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "macros.html" import mins, ring %}
+{% block title %}{{ lead.name }} · LeadSignal HQ{% endblock %}
+{% block content %}
+<header class="lead-head">
+  <div>
+    <a class="crumb" href="/">← Lead board</a>
+    <h1>{{ lead.name }}</h1>
+    <p>{{ lead.company or 'No company' }} · <span class="mono">{{ lead.email }}</span> · from {{ lead.source }}</p>
+  </div>
+  <div class="verdict">
+    {% if lead.status == 'new' %}
+      {{ ring(lead, left) }}
+      <div><strong>{% if overdue %}{{ mins(left) }} late{% else %}{{ mins(left) }} left{% endif %}</strong><small>to reply, due {{ due.strftime('%d %b %H:%M') }} UTC</small></div>
+    {% else %}
+      <div><strong>{{ lead.status | capitalize }}</strong><small>first reply is done</small></div>
+    {% endif %}
+  </div>
+</header>
+
+<div class="cols">
+  <section class="panel">
+    <div class="anatomy">
+      <header>
+        <h3>Where the score comes from</h3>
+        <div class="total">{{ lead.score }}<small> / 100 · {{ lead.priority }}</small></div>
+      </header>
+      <div class="bar" role="img" aria-label="Score {{ lead.score }} out of 100">
+        {% for key, reason, points in parts %}{% if points %}<i class="seg-{{ key }}" style="width: {{ points }}%" title="{{ reason }}: +{{ points }}"></i>{% endif %}{% endfor %}
+        <span class="mark" style="left: 50%"><span>warm 50</span></span>
+        <span class="mark" style="left: 75%"><span>hot 75</span></span>
+      </div>
+      <ul class="parts">
+        {% for key, reason, points in parts %}
+        <li class="{{ 'zero' if not points else '' }}"><i class="seg-{{ key }}"></i><span>{{ reason }}</span><b>{% if points %}+{{ points }}{% else %}0{% endif %}</b></li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <dl class="facts">
+      <div><dt>Owner</dt><dd>{{ lead.owner }}</dd></div>
+      <div><dt>Interest</dt><dd>{{ lead.interest or 'not given' }}</dd></div>
+      <div><dt>Budget</dt><dd class="num">${{ "{:,.0f}".format(lead.budget) }}</dd></div>
+      <div><dt>Country</dt><dd>{{ lead.country or 'not given' }}</dd></div>
+      <div><dt>Reply deadline</dt><dd>{{ lead.sla_minutes }} min after arrival</dd></div>
+      <div><dt>Arrived</dt><dd>{{ lead.created_at.strftime('%d %b %Y %H:%M') }} UTC</dd></div>
+    </dl>
+
+    <div class="status-row" aria-label="Status">
+      {% for s in statuses %}
+      <form method="post" action="/leads/{{ lead.id }}/status/{{ s }}"><button aria-pressed="{{ 'true' if s == lead.status else 'false' }}">{{ s | capitalize }}</button></form>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>History</h2><span>{{ events | length }} {{ 'event' if events | length == 1 else 'events' }}</span></div>
+    <ol class="timeline">
+      {% for e in events %}
+      <li><time>{{ e.created_at.strftime('%d %b %H:%M') }}</time><span>{{ e.detail.replace('->', 'to') }}</span></li>
+      {% else %}<li><span class="muted">No history.</span></li>{% endfor %}
+    </ol>
+  </section>
+</div>
+{% endblock %}

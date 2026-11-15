@@ -1,49 +1,194 @@
-from datetime import datetime,timedelta
-from fastapi import FastAPI,Depends,Request,Form
-from fastapi.responses import RedirectResponse
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import quote
+
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
-from sqlalchemy import select
-from pydantic import BaseModel,ConfigDict
-from .db import SessionLocal,engine,Base
-from .models import Lead,Event
-from .scoring import score_lead,choose_owner
-Base.metadata.create_all(bind=engine)
-app=FastAPI(title="LeadSignal HQ",version="1.0.0")
-templates=Jinja2Templates(directory="templates")
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from . import services
+from .db import SessionLocal, init_db
+from .models import Event, Lead, utcnow
+from .scoring import breakdown
+
+BASE = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=str(BASE / "templates"))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="LeadSignal HQ", version="1.1.0", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(BASE / "app" / "static")), name="static")
+
+
 def get_db():
-    db=SessionLocal()
-    try:yield db
-    finally:db.close()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 class LeadIn(BaseModel):
-    source:str="api"; name:str; email:str; company:str=""; country:str=""; budget:float=0; interest:str=""; notes:str=""
+    source: str = "api"
+    name: str
+    email: str
+    company: str = ""
+    country: str = ""
+    budget: float = 0
+    interest: str = ""
+    notes: str = ""
+
+
 class LeadOut(BaseModel):
-    model_config=ConfigDict(from_attributes=True)
-    id:int; source:str; name:str; email:str; company:str; country:str; budget:float; interest:str; score:int; priority:str; owner:str; status:str
-def event(db,lid,t,d):db.add(Event(lead_id=lid,event_type=t,detail=d));db.commit()
-def upsert(db,p):
-    email=p["email"].strip().lower(); ex=db.scalar(select(Lead).where(Lead.email==email))
-    if ex:event(db,ex.id,"duplicate_blocked",f"Duplicate ignored from {p.get('source','unknown')}");return ex,False
-    s,pri=score_lead(p); owner=choose_owner(p,s)
-    l=Lead(source=p.get("source","api"),name=p["name"].strip(),email=email,company=p.get("company","").strip(),country=p.get("country","").strip(),budget=float(p.get("budget") or 0),interest=p.get("interest","").strip(),score=s,priority=pri,owner=owner,status="new",sla_minutes=15 if pri=="hot" else 60 if pri=="warm" else 240,notes=p.get("notes","").strip())
-    db.add(l);db.commit();db.refresh(l);event(db,l.id,"lead_created",f"Scored {s}/100 and routed to {owner}");return l,True
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+    source: str
+    name: str
+    email: str
+    company: str
+    country: str
+    budget: float
+    interest: str
+    notes: str
+    score: int
+    priority: str
+    owner: str
+    status: str
+    sla_minutes: int
+
+
+class StatusIn(BaseModel):
+    status: str
+
+
+@app.exception_handler(services.LeadError)
+async def lead_error(request: Request, exc: services.LeadError):
+    return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request: Request, exc: StarletteHTTPException):
+    # People in the browser get a page; the API keeps JSON errors.
+    if exc.status_code == 404 and not request.url.path.startswith(("/api/", "/docs", "/openapi")):
+        return templates.TemplateResponse(request, "not_found.html", {}, status_code=404)
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+
 @app.get("/health")
-def health():return {"status":"ok"}
+def health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse({"status": "degraded", "database": "unavailable"}, status_code=503)
+    return {"status": "ok", "database": "ok"}
+
+
 @app.get("/")
-def dash(request:Request,db:Session=Depends(get_db)):
-    leads=list(db.scalars(select(Lead).order_by(Lead.created_at.desc())).all()); now=datetime.utcnow(); events=list(db.scalars(select(Event).order_by(Event.created_at.desc()).limit(8)).all())
-    st={"total":len(leads),"hot":sum(x.priority=="hot" for x in leads),"warm":sum(x.priority=="warm" for x in leads),"won":sum(x.status=="won" for x in leads),"avg":round(sum(x.score for x in leads)/len(leads),1) if leads else 0,"overdue":sum(x.status in {"new","contacted"} and now>x.created_at+timedelta(minutes=x.sla_minutes) for x in leads)}
-    return templates.TemplateResponse("dashboard.html",{"request":request,"leads":leads[:12],"events":events,"stats":st})
+def dashboard(request: Request, q: str = "", status: str = "", priority: str = "",
+              msg: str = "", db: Session = Depends(get_db)):
+    leads, total = services.search(db, q, status, priority, limit=50)
+    unanswered, _ = services.search(db, status="new", limit=500)
+    now = utcnow()
+    rows = [{"lead": l, "overdue": services.is_overdue(l, now),
+             "left": services.minutes_left(l, now)} for l in leads]
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "rows": rows, "activity": services.recent_activity(db, 9), "stats": services.stats(db),
+        "board": services.response_board(unanswered, now), "matched": total,
+        "q": q, "status": status, "priority": priority, "msg": msg,
+        "statuses": services.STATUSES, "priorities": services.PRIORITIES,
+    })
+
+
+@app.get("/leads/{lead_id}")
+def lead_page(request: Request, lead_id: int, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if lead is None:
+        raise HTTPException(404, "Lead not found")
+    events = db.scalars(select(Event).where(Event.lead_id == lead.id)
+                        .order_by(Event.created_at.desc(), Event.id.desc())).all()
+    parts = breakdown({"budget": lead.budget, "company": lead.company,
+                       "interest": lead.interest, "country": lead.country})
+    now = utcnow()
+    return templates.TemplateResponse(request, "lead.html", {
+        "lead": lead, "events": events, "parts": parts, "statuses": services.STATUSES,
+        "overdue": services.is_overdue(lead, now), "left": services.minutes_left(lead, now),
+        "due": services.due_at(lead),
+    })
+
+
 @app.post("/leads")
-def create(payload:LeadIn,db:Session=Depends(get_db)):
-    l,c=upsert(db,payload.model_dump());return {"created":c,"lead":LeadOut.model_validate(l)}
+def create(payload: LeadIn, db: Session = Depends(get_db)):
+    lead, created = services.create_lead(db, payload.model_dump())
+    return {"created": created, "lead": LeadOut.model_validate(lead)}
+
+
 @app.post("/leads/form")
-def form(name:str=Form(...),email:str=Form(...),company:str=Form(""),country:str=Form(""),budget:float=Form(0),interest:str=Form(""),db:Session=Depends(get_db)):
-    upsert(db,{"source":"website","name":name,"email":email,"company":company,"country":country,"budget":budget,"interest":interest});return RedirectResponse("/",303)
+def form(name: str = Form(""), email: str = Form(""), company: str = Form(""), country: str = Form(""),
+         budget: str = Form("0"), interest: str = Form(""), db: Session = Depends(get_db)):
+    try:
+        lead, created = services.create_lead(db, {
+            "source": "website", "name": name, "email": email, "company": company,
+            "country": country, "budget": budget, "interest": interest})
+        msg = (f"Lead created: {lead.name}, score {lead.score}, owner {lead.owner}" if created
+               else f"{lead.email} already exists, duplicate ignored")
+    except services.LeadError as e:
+        msg = f"Not saved: {e}"
+    return RedirectResponse(f"/?msg={quote(msg)}", 303)
+
+
 @app.post("/leads/{lead_id}/status/{status}")
-def status(lead_id:int,status:str,db:Session=Depends(get_db)):
-    l=db.get(Lead,lead_id)
-    if l:l.status=status;db.commit();event(db,l.id,"status_changed",f"Status changed to {status}")
-    return RedirectResponse("/",303)
-@app.get("/api/leads",response_model=list[LeadOut])
-def api_leads(db:Session=Depends(get_db)):return list(db.scalars(select(Lead).order_by(Lead.created_at.desc())).all())
+def change_status_form(lead_id: int, status: str, db: Session = Depends(get_db)):
+    try:
+        lead = services.set_status(db, lead_id, status)
+    except services.LeadError as e:
+        raise HTTPException(422, str(e)) from None
+    if lead is None:
+        raise HTTPException(404, "Lead not found")
+    return RedirectResponse(f"/leads/{lead_id}", 303)
+
+
+@app.get("/api/leads", response_model=list[LeadOut])
+def api_leads(q: str = "", status: str = "", priority: str = "",
+              limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
+              db: Session = Depends(get_db)):
+    return services.search(db, q, status, priority, limit, offset)[0]
+
+
+@app.get("/api/leads/export.csv")
+def export_csv(q: str = "", status: str = "", priority: str = "", db: Session = Depends(get_db)):
+    leads, _ = services.search(db, q, status, priority, limit=100000)
+    return Response(services.to_csv(leads), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="leads.csv"'})
+
+
+@app.get("/api/leads/{lead_id}", response_model=LeadOut)
+def api_lead(lead_id: int, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if lead is None:
+        raise HTTPException(404, "Lead not found")
+    return lead
+
+
+@app.patch("/api/leads/{lead_id}/status", response_model=LeadOut)
+def api_status(lead_id: int, body: StatusIn, db: Session = Depends(get_db)):
+    lead = services.set_status(db, lead_id, body.status)
+    if lead is None:
+        raise HTTPException(404, "Lead not found")
+    return lead
+
+
+@app.get("/api/stats")
+def api_stats(db: Session = Depends(get_db)):
+    return services.stats(db)
