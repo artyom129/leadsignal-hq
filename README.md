@@ -37,20 +37,20 @@ route to Backend, Automation, Senior Sales or the sales queue
 reply deadline → the board → status workflow → CSV for the CRM
 ```
 
-## 🔄 What I changed in this version
+## 🔄 What's new in this version
 
-| Area | What I found | What I did |
-| --- | --- | --- |
-| Input | Any string was accepted as an email; a budget of `NaN` or `-5` went straight into the score; a bad budget on the web form crashed with a raw 422 page | Emails, names and budgets are checked and normalised; the form reports the problem in plain words |
-| Duplicates | The check was "look, then insert", with no unique index, so two requests at once created two leads | A unique index on email, and the race is caught and turned into "duplicate ignored" |
-| Routing | "capital markets" went to the Backend Team because it contains "api"; "data pipeline" landed in the sales queue | Routing matches whole words; pipeline work goes to Automation |
-| Scoring | "United States", "Germany" and "API  Integration" with extra spaces were not recognised | Country names and codes both count; interest is case and space insensitive; the point values live in one place |
-| Deadlines | Leads already contacted still counted as overdue | The deadline is for the first reply, so only untouched leads can be late |
-| Status | Any word was accepted as a status, "banana" included | Five statuses, anything else is a 422 |
-| Search | No search, filters or paging; `%` in a query matched everything | Search across name, email, company and interest, filters, paging, `%` and `_` as plain text |
-| API | One list endpoint with no paging | Paging, a single lead, status updates, stats and a formula-safe CSV export |
-| Plumbing | `datetime.utcnow`, tables created at import, templates found only from one working directory, `/health` always "ok" | Timezone-safe timestamps, startup migration for older databases, absolute paths, a health check that touches the database |
-| Interface | A table and six identical number cards | A dispatch board, described below |
+| Area | How it works now |
+| --- | --- |
+| Input | Emails, names and budgets are checked and normalised; the form reports the problem in plain words |
+| Duplicates | A unique index on email, and the race is caught and turned into "duplicate ignored" |
+| Routing | Routing matches whole words; pipeline work goes to Automation |
+| Scoring | Country names and codes both count; interest is case and space insensitive; the point values live in one place |
+| Deadlines | The deadline is for the first reply, so only untouched leads can be late |
+| Status | Five statuses, anything else is a 422 |
+| Search | Search across name, email, company and interest, filters, paging, `%` and `_` as plain text |
+| API | Paging, a single lead, status updates, stats and a formula-safe CSV export |
+| Plumbing | Timezone-safe timestamps, startup migration for older databases, absolute paths, a health check that touches the database |
+| Interface | A dispatch board, described below |
 
 ### 🎨 Design
 
